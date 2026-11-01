@@ -1,0 +1,153 @@
+# unlyx (Python)
+
+Official Python SDK for the **Unlyx REST API v1** — balance, services, orders (single and bulk), cancel, webhooks and usage for any Unlyx shop.
+
+- Python 3.9+, standard library only. Fully typed (`py.typed`).
+- HTTPS only, TLS verified, redirects never followed.
+- Every POST carries an `Idempotency-Key`; retries re-send the same key, so a network hiccup can never charge an order twice.
+- One exception type: `unlyx.UnlyxError`.
+- `unlyx.verify_webhook()` checks signed webhook deliveries.
+
+## Install
+
+```bash
+pip install unlyx
+```
+
+Until the package is on PyPI, install it from a copy of this folder: `pip install ./sdks/python`.
+
+## Quick start
+
+```python
+import os
+import unlyx
+
+client = unlyx.Client("https://yourshop.com", os.environ["UNLYX_API_KEY"])
+
+account = client.account()
+print(account.balance, account.currency)
+
+for service in client.services("imei"):
+    print(service.id, service.name, service.price, service.currency)
+
+# Use your own order id as the idempotency key: running the same code twice
+# returns the first order, never a second charge.
+order = client.place_order(42, "356938035643809", idempotency_key="my-order-1001")
+print(order.reference, order.status)
+
+order = client.order(order.reference)
+if order.is_success:
+    print("Result:", order.reply)
+```
+
+Get a key in the shop: **Account → API**. Tick *Sandbox* to build without spending money — sandbox orders get a `SANDBOX-` reference and never reach a supplier.
+
+## All methods
+
+| Method | Endpoint | Returns |
+|---|---|---|
+| `account()` | `GET /account` | `Account` |
+| `usage(days=7)` | `GET /usage` | `Usage` |
+| `services(type=None)` | `GET /services` | `list[Service]` |
+| `service(id)` | `GET /services/{id}` | `Service` |
+| `place_order(service, imei=None, *, quantity, fields, note, file, idempotency_key)` | `POST /orders` | `Order` (`replayed`, `balance` set) |
+| `place_orders([...])` | `POST /orders/bulk` | `BulkResult` |
+| `orders(*, status, since, imei, page, per_page)` | `GET /orders` | `OrderPage` |
+| `order(reference)` | `GET /orders/{reference}` | `Order` |
+| `cancel_order(reference)` | `POST /orders/{reference}/cancel` | `Order` |
+| `webhooks()` | `GET /webhooks` | `list[WebhookEndpoint]` |
+| `create_webhook(url, events=None, name=None)` | `POST /webhooks` | `WebhookEndpoint` (`secret` set once) |
+| `delete_webhook(id)` | `DELETE /webhooks/{id}` | `bool` |
+| `request(method, path, query=None, body=None, headers=None)` | anything under `/api/v1` | decoded JSON envelope |
+
+Money (`balance`, `price`) is kept as an exact decimal string — use `decimal.Decimal(order.price)` for maths.
+
+Bulk: up to 100 lines; each succeeds or fails on its own. A line's `reference` is its idempotency key; lines without one get a random reference so the SDK's retries are safe.
+
+```python
+result = client.place_orders([
+    {"reference": "batch7-1", "service": 42, "imei": "356938035643809"},
+    {"reference": "batch7-2", "service": 42, "imei": "359070071234567"},
+])
+for line in result.failed:
+    print(line.reference, line.error_message)
+```
+
+## Options
+
+```python
+client = unlyx.Client(
+    "https://yourshop.com", key,
+    timeout=30, connect_timeout=10,
+    max_retries=2,          # 0 turns retries off
+    max_retry_wait=60,      # never sleep longer than this for a Retry-After
+    signing_key_id=None,    # optional request signing, see below
+    signing_secret=None,
+    ca_bundle=None,         # path to a CA bundle if the system has none
+    user_agent="my-panel/2.3",
+)
+```
+
+### When the SDK retries
+
+| Situation | GET | POST |
+|---|---|---|
+| Connection failed before anything was sent (DNS, refused, TLS) | retried | retried, same Idempotency-Key |
+| HTTP 429 with `Retry-After` (≤ `max_retry_wait`) | retried after that wait | retried after that wait, same key |
+| HTTP 5xx | retried with backoff | **not retried** (except below) |
+| HTTP 503 with error code `temporary` (shop database busy, nothing placed) | retried | retried, same key |
+| Timeout / connection lost after sending | retried | **not retried** — check the order, or repeat with the same key |
+
+### Request signing (optional)
+
+If the shop turned on signed requests for your key, pass `signing_key_id` and `signing_secret`. Every request then carries `X-Key-Id`, `X-Timestamp` (unix seconds) and `X-Signature` = hex HMAC-SHA256 of `"{METHOD}\n{path}\n{timestamp}\n{rawBody}"` (path without the query string, e.g. `/api/v1/orders`; empty body for GET).
+
+## Errors
+
+```python
+try:
+    client.place_order(42, "356938035643809", idempotency_key="my-order-1002")
+except unlyx.UnlyxError as e:
+    e.code          # "low_balance", "invalid_input", "not_found", "service_disabled", "rate_limited", "connection_error" …
+    e.http_status   # 402, 404, 409, 422, 429 … (0 = no response)
+    e.message       # readable text from the shop
+    e.reference     # short support reference — quote it to the shop
+    e.retry_after   # seconds, on 429
+    e.body          # decoded JSON body
+```
+
+## Webhooks
+
+```python
+# Flask
+import os
+from flask import Flask, request, abort
+import unlyx
+
+app = Flask(__name__)
+
+@app.post("/hooks/unlyx")
+def unlyx_hook():
+    try:
+        event = unlyx.verify_webhook(request.get_data(), request.headers, os.environ["UNLYX_WEBHOOK_SECRET"])
+    except unlyx.UnlyxError:
+        abort(400)
+    # event["event"] == "order.completed"; event["data"]["reference"], event["data"]["reply"] …
+    # Use the X-Unlyx-Delivery header to ignore a delivery you already handled.
+    return "", 200
+```
+
+Always pass the **raw** body bytes. `verify_webhook` checks `X-Unlyx-Signature` (`t=<unix>,v1=<hex HMAC-SHA256 of "<unix>.<body>">`), refuses timestamps more than 5 minutes off (`tolerance=`), and accepts a list of secrets while you rotate.
+
+## Tests
+
+```bash
+pip install pytest
+pytest            # or: python -m unittest discover -s tests
+```
+
+The suite uses a mocked transport and never calls a real shop. Plug in your own HTTP stack by passing any object with a `send(HttpRequest) -> HttpResponse` method as `transport=`.
+
+## License
+
+MIT

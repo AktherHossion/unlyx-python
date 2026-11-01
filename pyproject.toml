@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "unlyx"
+version = "1.0.0"
+description = "Official Python SDK for the Unlyx REST API v1 (account, services, orders, webhooks, usage)."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Unlyx" }]
+keywords = ["unlyx", "imei", "unlock", "reseller", "gsm", "api", "sdk", "webhooks"]
+dependencies = []
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[tool.setuptools]
+packages = ["unlyx"]
+
+[tool.setuptools.package-data]
+unlyx = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[project.urls]
+Homepage = "https://unlyx.com/developers"
+Source = "https://github.com/AktherHossion/unlyx-python"
+Issues = "https://github.com/AktherHossion/unlyx-python/issues"
