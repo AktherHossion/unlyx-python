@@ -14,7 +14,7 @@ Official Python SDK for the **Unlyx REST API v1** — balance, services, orders 
 pip install unlyx
 ```
 
-Until the package is on PyPI, install it from a copy of this folder: `pip install ./sdks/python`.
+PyPI: https://pypi.org/project/unlyx/
 
 ## Quick start
 
