@@ -235,7 +235,7 @@ class ClientTest(unittest.TestCase):
     def test_orders_filters(self):
         self.http.json(200, {"ok": True, "page": 1, "per_page": 2, "total": 5, "data": [order_row(), order_row(reference="UX-1002")]})
         page = self.client().orders(status="completed", since=datetime(2026, 10, 1, tzinfo=timezone.utc), per_page=2)
-        self.assertEqual(self.http.last.url, "https://yourshop.com/api/v1/orders?status=completed&since=2026-10-01T00%3A00%3A00%2B00%3A00&per_page=2")
+        self.assertEqual(self.http.last.url, "https://yourshop.com/api/v1/orders?per_page=2&since=2026-10-01T00%3A00%3A00%2B00%3A00&status=completed")
         self.assertEqual(len(page.orders), 2)
         self.assertTrue(page.has_more)
 

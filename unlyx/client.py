@@ -13,7 +13,7 @@ import time
 import uuid
 from datetime import date, datetime
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Union
-from urllib.parse import quote, urlencode, urlsplit
+from urllib.parse import quote, urlsplit
 
 from ._version import __version__
 from .errors import UnlyxError
@@ -26,9 +26,23 @@ _ORDER_FILTERS = ("status", "since", "imei", "page", "per_page")
 
 
 def request_signature(secret: str, method: str, path: str, timestamp: str, raw_body: bytes) -> str:
-    """hex HMAC-SHA256 over ``"{METHOD}\\n{path}\\n{timestamp}\\n{rawBody}"``; ``path`` has no query string."""
+    """hex HMAC-SHA256 over ``"{METHOD}\\n{path}\\n{timestamp}\\n{rawBody}"``.
+
+    Since 1.0.1 ``path`` is the canonical request target: the URL path, plus ``"?"`` and the canonical query
+    string when there are query params (see :func:`canonical_query`), so the query is signed too.
+    """
     msg = ("%s\n%s\n%s\n" % (method.upper(), path, timestamp)).encode("utf-8") + raw_body
     return hmac.new(secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()
+
+
+def canonical_query(query: Mapping[str, Any]) -> str:
+    """Canonical query for signing: params sorted by key, each key and value RFC3986-encoded, joined by ``"&"``."""
+    parts = []
+    for k in sorted(k for k, v in query.items() if v is not None):
+        v = query[k]
+        for vv in (v if isinstance(v, (list, tuple)) else [v]):
+            parts.append(quote(str(k), safe="") + "=" + quote(str(vv), safe=""))
+    return "&".join(parts)
 
 
 class Client:
@@ -242,7 +256,9 @@ class Client:
             if re.search(r"[\r\n]", str(k) + str(v)):
                 raise UnlyxError("Header values must not contain line breaks", "invalid_argument")
         q = {k: v for k, v in (query or {}).items() if v is not None}
-        url = self._api_base + path + ("?" + urlencode(q, quote_via=quote) if q else "")
+        # Signed requests cover the query too; build the URL from the same canonical (sorted, RFC3986) string we sign.
+        cq = canonical_query(q)
+        url = self._api_base + path + ("?" + cq if cq else "")
         raw: Optional[bytes] = None
         if body is not None:
             try:
@@ -299,7 +315,9 @@ class Client:
             ts = str(int(time.time()))  # fresh on every attempt
             h["X-Key-Id"] = self._signing_key_id
             h["X-Timestamp"] = ts
-            h["X-Signature"] = request_signature(self._signing_secret, method, urlsplit(url).path, ts, raw or b"")
+            parts = urlsplit(url)
+            target = parts.path + ("?" + parts.query if parts.query else "")  # query already canonical
+            h["X-Signature"] = request_signature(self._signing_secret, method, target, ts, raw or b"")
         for k, v in extra.items():
             h[str(k)] = str(v)
         return h

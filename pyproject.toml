@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "unlyx"
-version = "1.0.0"
+version = "1.0.2"
 description = "Official Python SDK for the Unlyx REST API v1 (account, services, orders, webhooks, usage)."
 readme = "README.md"
 requires-python = ">=3.9"
